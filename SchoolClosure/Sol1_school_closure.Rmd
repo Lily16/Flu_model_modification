@@ -1,0 +1,1038 @@
+---
+title: "Limit the outbreak of pandemic flu : First solution, school closure"
+author: "Aurelie Nerin"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{First solution school closure}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r,include=F}
+
+library(fluEvidenceSynthesis)
+library(pander)
+library(ggplot2)
+load(file="polymod_UK_4_Aurelie.R")
+load(file="polymod_UK_hol_4_Aurelie.R")
+
+```
+
+#  Introduction 
+
+Young people have more contacts than adults especially in places like school ideal for transmission of diseases like influenza. In this vignette, we will study the effect of school closure on the propagation of the seasonal flu and the pandemic flu to see if it is a viable solution. 
+
+#  Parameters of the model 
+
+## Division of the population in seven age groups 
+
+In the United Kingdom, the education system is divided into 4 schools : 
+
+-	Pre-school (for children between 3 and 5 years old)
+-	Primary school (for children between 6 and 12 years old)
+-	Secondary school (for children between 13 and 16 years old) 
+-	High school (for children between 17 and 18 years old)
+
+That's why we create the seven following age groups to see the effects of school closures: <0-2>, <3-5>, <6-12>, <13-16>, <17-18>, <19-64>, > 65. 
+
+```{r,cache=T}
+
+# Population divided by age (0 years old, 1 years old, etc.)
+data(demography) 
+
+#Creation of seven age groups to test the efficiency of school closure : <0-2>, <3-5>, <6-12>, <13-16>, <17-18>, <19-64>, > 65
+
+age_groups_school_closure <- stratify_by_age(demography,limits = c(3,6,13,17,19,65))
+pander(age_groups_school_closure)
+
+#Creation of two risk groups (low risk and high risk)
+population <- stratify_by_risk( age_groups_school_closure, matrix(c(0.01,0.01,0.01,0.01,0.01,0.01,0.4),nrow=1))
+
+```
+
+## Initial infected
+
+The number of people infected at the beginning of the season, again separated into age groups and risk groups.
+
+```{r}
+
+ag <- c(1000,1000,1000,1000,1000,1000,1000)
+initial.infected <- stratify_by_risk( ag, matrix(c(0.01,0.01,0.01,0.01,0.01,0.01,0.4),nrow=1)) 
+
+```
+
+## Vaccination calendar
+
+In this vignette, we want to study the effect of school closure. That's why there will be no vaccination (uptake of vaccine calendar and efficacy of the vaccine are 0). 
+
+```{r}
+
+vaccine_calendar <- as_vaccination_calendar(
+  efficacy = c(0,0),
+  coverage = as.data.frame(matrix(c(0,0,0,0,0,0,0,0), nrow = 2, byrow = T)),
+  dates = c(as.Date("2010-10-01"), as.Date("2011-02-01")), # begin and end date
+  no_age_groups = 7,
+  no_risk_groups = 2
+)
+
+```
+
+
+## Epidemiological parameters
+
+Different parameter values in the epidemiological model. We assume susceptibility is different for the different age groups, while transmissibility is the same for each age group. Infection_delays are the average time going from exposed to infected and from infected to recovered.
+
+```{r}
+
+#Parameters for seasonal flu 
+
+transmissibility_s <- 0.17
+susceptibility_s <- c(0.7,0.7,0.7,0.7,0.7,0.7,0.3)
+infection_delays_s <- c(0.8,1.8)
+
+#Parameters for pandemic flu 
+transmissibility_p <- 0.15
+susceptibility_p <- c(1,1,1,1,1,1,1)
+infection_delays_p <- c(0.8,1.8)
+
+```
+
+#  Contact matrix
+
+We create two contact matrices : 
+
+- one for the simulation without school closure : `contacts_no_closure` using the non-holiday polymod data `polymod_uk_school`
+- one for the simulation with school closure : `contacts_closure` using the holiday polymod data `polymod_uk_holiday`
+
+
+```{r}
+
+#Creation of polymod_data modelling school closure 
+
+#Data frame polymod_uk for no school closure 
+polymod_uk_school <- data.frame(polymod_UK)
+polymod_uk_holiday <-data.frame(polymod_UK_hol)
+names(polymod_uk_school)[1]<-"V1"
+names(polymod_uk_school)[2]<-"V2"
+names(polymod_uk_holiday)[1]<-"V1"
+
+#Creation of contact matrix 
+
+#Contact matrix with no school closure 
+contacts_no_closure <- contact_matrix(as.matrix(polymod_uk_school),demography,age_group_limits = as.numeric(c(3,6,13,17,19,65)))
+pander(contacts_no_closure)
+
+contacts_closure <- contact_matrix(as.matrix(polymod_uk_holiday),demography,age_group_limits = as.numeric(c(3,6,13,17,19,65)))
+pander(contacts_closure)
+
+```
+
+#  Effects of school closure on the flu outbreak 
+
+## First estimation of the effects of school closure 
+
+To have a first idea of the effects of school closure on the outbreak, we first calculate the basic reproduction number R0 in case of school and in case of school closure. 
+
+R0 represents the number of people infected by one sick person, meaning the lower R0 is, the less important the outbreak is going to be. For flu, R0 is between 1 and 2. 
+
+```{r}
+
+#Evaluation of Basic Reproduction Number R0 for seasonal flu 
+
+#R0 with no school closure 
+R0_no_school_closure_s <- as_R0(transmissibility_s,contacts_no_closure,age_groups_school_closure)
+
+#R0 with school closure 
+R0_school_closure_s <- as_R0(transmissibility_s,contacts_closure,age_groups_school_closure)
+
+
+#Evaluation of Basic Reproduction Number R0 for pandemic flu 
+
+#R0 with no school closure 
+R0_no_school_closure_p <- as_R0(transmissibility_p,contacts_no_closure,age_groups_school_closure)
+
+#R0 with school closure 
+R0_school_closure_p <- as_R0(transmissibility_p,contacts_closure,age_groups_school_closure)
+
+#Results in a table 
+R0_results <- data.frame(
+  No_school_closure = c(R0_no_school_closure_s,R0_no_school_closure_p),
+  School_closure = c(R0_school_closure_s,R0_school_closure_p),
+  row.names = c("Seasonal flu","Pandemic flu")
+)
+
+pander(R0_results)
+
+```
+
+## Study of the effects on school closure on the outbreak of seasonal flu 
+
+We use the epidemic model to do a simulation of an epidemy of seasonal flu to study the number of people infected and see the impacts of school closure on this number. 
+
+```{r}
+
+#Model for seasonal flu without school closure 
+
+odes_no_closure_s <- infectionODEs( population, initial.infected, vaccine_calendar, contacts_no_closure, susceptibility_s, transmissibility_s, infection_delays_s, 7 )
+
+pander(head(odes_no_closure_s))
+
+#Model for pandemic flu with school closure 
+
+odes_closure_s <- infectionODEs( population, initial.infected, vaccine_calendar, contacts_closure, susceptibility_s, transmissibility_s, infection_delays_s, 7 )
+
+pander(head(odes_closure_s))
+
+```
+
+We obtain the following outbreaks for low and high risk people: 
+
+```{r,fig.width=11,fig.height=8,fig.show='hold'}
+
+#Graphic for seasonal flu outbreaks without school closure 
+
+fraction.infected_nc_s <- odes_no_closure_s
+fraction.infected_nc_s$V1 <- fraction.infected_nc_s$V1/population[1]
+fraction.infected_nc_s$V2 <- fraction.infected_nc_s$V2/population[2]
+fraction.infected_nc_s$V3 <- fraction.infected_nc_s$V3/population[3]
+fraction.infected_nc_s$V4 <- fraction.infected_nc_s$V4/population[4]
+fraction.infected_nc_s$V5 <- fraction.infected_nc_s$V5/population[5]
+fraction.infected_nc_s$V6 <- fraction.infected_nc_s$V6/population[6]
+fraction.infected_nc_s$V7 <- fraction.infected_nc_s$V7/population[7]
+fraction.infected_nc_s$V8 <- fraction.infected_nc_s$V8/population[8]
+fraction.infected_nc_s$V9 <- fraction.infected_nc_s$V9/population[9]
+fraction.infected_nc_s$V10 <- fraction.infected_nc_s$V10/population[10]
+fraction.infected_nc_s$V11 <- fraction.infected_nc_s$V11/population[11]
+fraction.infected_nc_s$V12 <- fraction.infected_nc_s$V12/population[12]
+fraction.infected_nc_s$V13 <- fraction.infected_nc_s$V13/population[13]
+fraction.infected_nc_s$V14 <- fraction.infected_nc_s$V14/population[14]
+
+#Graphic for low risk people 
+
+ggplot( data=fraction.infected_nc_s ) + geom_line( aes(x=Time, y=V1, colour = "0-2") ) + 
+  geom_line( aes(x=Time,y=V2, colour="3-5") )  + 
+  geom_line( aes(x=Time, y=V3, colour = "6-12") ) + 
+  geom_line( aes(x=Time,y=V4, colour="13-16") )  +
+  geom_line( aes(x=Time, y=V5, colour = "17-18") ) + 
+  geom_line( aes(x=Time,y=V6, colour="19-64") )  +
+  geom_line( aes(x=Time, y=V7, colour = "65+") ) + 
+  scale_colour_manual("", 
+                      breaks = c("0-2","3-5","6-12","13-16","17-18","19-64","65+"),
+                      values = c("darkblue","blue","darkred","red","darkviolet","violet","seagreen")) +
+  ylab( "Fraction infected" )+
+  labs(title = "Outbreaks of seasonal flu for low risk people without school closure")
+
+#Graphic for high risk people 
+
+ggplot( data=fraction.infected_nc_s ) + 
+  geom_line( aes(x=Time, y=V8, colour="0-2 High risk") ) +
+  geom_line( aes(x=Time,y=V9, colour="3-5 High risk") ) +
+  geom_line( aes(x=Time, y=V10, colour="6-12 High risk") ) +
+  geom_line( aes(x=Time,y=V11, colour="13-16 High risk") ) +
+  geom_line( aes(x=Time, y=V12, colour="17-18 High risk") ) +
+  geom_line( aes(x=Time,y=V13, colour="19-64 High risk") ) +
+  geom_line( aes(x=Time, y=V14, colour="65+ High risk") ) +
+  scale_colour_manual("", 
+                      breaks = c("0-2 High risk","3-5 High risk","6-12 High risk","13-16 High risk","17-18 High risk","19-64 High risk","65+ High risk"),
+                      values = c("darkturquoise","turquoise","darkgreen","green3","darkorange","orange","royalblue")) +
+  ylab( "Fraction infected" )+
+  labs(title = "Outbreaks of seasonal flu for high risk people without school closure")
+
+#Graphic for seasonal flu outbreaks with school closure 
+
+fraction.infected_c_s <- odes_closure_s
+fraction.infected_c_s$V1 <- fraction.infected_c_s$V1/population[1]
+fraction.infected_c_s$V2 <- fraction.infected_c_s$V2/population[2]
+fraction.infected_c_s$V3 <- fraction.infected_c_s$V3/population[3]
+fraction.infected_c_s$V4 <- fraction.infected_c_s$V4/population[4]
+fraction.infected_c_s$V5 <- fraction.infected_c_s$V5/population[5]
+fraction.infected_c_s$V6 <- fraction.infected_c_s$V6/population[6]
+fraction.infected_c_s$V7 <- fraction.infected_c_s$V7/population[7]
+fraction.infected_c_s$V8 <- fraction.infected_c_s$V8/population[8]
+fraction.infected_c_s$V9 <- fraction.infected_c_s$V9/population[9]
+fraction.infected_c_s$V10 <- fraction.infected_c_s$V10/population[10]
+fraction.infected_c_s$V11 <- fraction.infected_c_s$V11/population[11]
+fraction.infected_c_s$V12 <- fraction.infected_c_s$V12/population[12]
+fraction.infected_c_s$V13 <- fraction.infected_c_s$V13/population[13]
+fraction.infected_c_s$V14 <- fraction.infected_c_s$V14/population[14]
+
+#Graphic for low risk people 
+
+ggplot( data=fraction.infected_c_s ) + geom_line( aes(x=Time, y=V1, colour = "0-2") ) + 
+  geom_line( aes(x=Time,y=V2, colour="3-5") )  + 
+  geom_line( aes(x=Time, y=V3, colour = "6-12") ) + 
+  geom_line( aes(x=Time,y=V4, colour="13-16") )  +
+  geom_line( aes(x=Time, y=V5, colour = "17-18") ) + 
+  geom_line( aes(x=Time,y=V6, colour="19-64") )  +
+  geom_line( aes(x=Time, y=V7, colour = "65+") ) + 
+  scale_colour_manual("", 
+                      breaks = c("0-2","3-5","6-12","13-16","17-18","19-64","65+"),
+                      values = c("darkblue","blue","darkred","red","darkviolet","violet","seagreen")) +
+  ylab( "Fraction infected" )+ 
+  labs(title = "Outbreaks of seasonal flu for low risk people with school closure")
+
+#Graphic for high risk people 
+
+ggplot( data=fraction.infected_c_s ) + 
+  geom_line( aes(x=Time, y=V8, colour="0-2 High risk") ) +
+  geom_line( aes(x=Time,y=V9, colour="3-5 High risk") ) +
+  geom_line( aes(x=Time, y=V10, colour="6-12 High risk") ) +
+  geom_line( aes(x=Time,y=V11, colour="13-16 High risk") ) +
+  geom_line( aes(x=Time, y=V12, colour="17-18 High risk") ) +
+  geom_line( aes(x=Time,y=V13, colour="19-64 High risk") ) +
+  geom_line( aes(x=Time, y=V14, colour="65+ High risk") ) +
+  scale_colour_manual("", 
+                      breaks = c("0-2 High risk","3-5 High risk","6-12 High risk","13-16 High risk","17-18 High risk","19-64 High risk","65+ High risk"),
+                      values = c("darkturquoise","turquoise","darkgreen","green3","darkorange","orange","royalblue")) +
+  ylab( "Fraction infected" )+ 
+  labs(title = "Outbreaks of seasonal flu for high risk people with school closure")
+
+```
+
+We can see that the peak of fractions of people infected is lower in case of school closure. This confirms that school closure is an efficient way to limit the spreading of the flu. 
+
+## Study of the effects on school closure on the outbreak of pandemic flu 
+
+We use the epidemic model to do a simulation of an epidemy of pandemic flu to study the number of people infected and see the impacts of school closure on this number. 
+
+```{r}
+
+#Model for pandemic flu without school closure 
+
+odes_no_closure_p <- infectionODEs( population, initial.infected, vaccine_calendar, contacts_no_closure, susceptibility_p, transmissibility_p, infection_delays_p, 7 )
+
+pander(head(odes_no_closure_p))
+
+#Model for pandemic flu with school closure 
+
+odes_closure_p <- infectionODEs( population, initial.infected, vaccine_calendar, contacts_closure, susceptibility_p, transmissibility_p, infection_delays_p, 7 )
+
+pander(head(odes_closure_p))
+
+```
+
+We obtain the following outbreaks for low and high risk people: 
+
+```{r,fig.width=11,fig.height=8,fig.show='hold'}
+
+#Graphic for seasonal flu outbreaks without school closure 
+
+fraction.infected_nc_p <- odes_no_closure_p
+fraction.infected_nc_p$V1 <- fraction.infected_nc_p$V1/population[1]
+fraction.infected_nc_p$V2 <- fraction.infected_nc_p$V2/population[2]
+fraction.infected_nc_p$V3 <- fraction.infected_nc_p$V3/population[3]
+fraction.infected_nc_p$V4 <- fraction.infected_nc_p$V4/population[4]
+fraction.infected_nc_p$V5 <- fraction.infected_nc_p$V5/population[5]
+fraction.infected_nc_p$V6 <- fraction.infected_nc_p$V6/population[6]
+fraction.infected_nc_p$V7 <- fraction.infected_nc_p$V7/population[7]
+fraction.infected_nc_p$V8 <- fraction.infected_nc_p$V8/population[8]
+fraction.infected_nc_p$V9 <- fraction.infected_nc_p$V9/population[9]
+fraction.infected_nc_p$V10 <- fraction.infected_nc_p$V10/population[10]
+fraction.infected_nc_p$V11 <- fraction.infected_nc_p$V11/population[11]
+fraction.infected_nc_p$V12 <- fraction.infected_nc_p$V12/population[12]
+fraction.infected_nc_p$V13 <- fraction.infected_nc_p$V13/population[13]
+fraction.infected_nc_p$V14 <- fraction.infected_nc_p$V14/population[14]
+
+#Graphic for low risk people 
+
+ggplot( data=fraction.infected_nc_p ) + geom_line( aes(x=Time, y=V1, colour = "0-2") ) + 
+  geom_line( aes(x=Time,y=V2, colour="3-5") )  + 
+  geom_line( aes(x=Time, y=V3, colour = "6-12") ) + 
+  geom_line( aes(x=Time,y=V4, colour="13-16") )  +
+  geom_line( aes(x=Time, y=V5, colour = "17-18") ) + 
+  geom_line( aes(x=Time,y=V6, colour="19-64") )  +
+  geom_line( aes(x=Time, y=V7, colour = "65+") ) + 
+  scale_colour_manual("", 
+                      breaks = c("0-2","3-5","6-12","13-16","17-18","19-64","65+"),
+                      values = c("darkblue","blue","darkred","red","darkviolet","violet","seagreen")) +
+  ylab( "Fraction infected" )+
+  labs(title = "Outbreaks of pandemic flu for low risk people without school closure")
+
+#Graphic for high risk people 
+
+ggplot( data=fraction.infected_nc_p ) +
+  geom_line( aes(x=Time, y=V8, colour="0-2 High risk") ) +
+  geom_line( aes(x=Time,y=V9, colour="3-5 High risk") ) +
+  geom_line( aes(x=Time, y=V10, colour="6-12 High risk") ) +
+  geom_line( aes(x=Time,y=V11, colour="13-16 High risk") ) +
+  geom_line( aes(x=Time, y=V12, colour="17-18 High risk") ) +
+  geom_line( aes(x=Time,y=V13, colour="19-64 High risk") ) +
+  geom_line( aes(x=Time, y=V14, colour="65+ High risk") ) +
+  scale_colour_manual("", 
+                      breaks = c("0-2 High risk","3-5 High risk","6-12 High risk","13-16 High risk","17-18 High risk","19-64 High risk","65+ High risk"),
+                      values = c("darkturquoise","turquoise","darkgreen","green3","darkorange","orange","royalblue")) +
+  ylab( "Fraction infected" )+
+  labs(title = "Outbreaks of pandemic flu for high risk people without school closure")
+
+#Graphic for pandemic flu outbreaks with school closure 
+
+fraction.infected_c_p <- odes_closure_p
+fraction.infected_c_p$V1 <- fraction.infected_c_p$V1/population[1]
+fraction.infected_c_p$V2 <- fraction.infected_c_p$V2/population[2]
+fraction.infected_c_p$V3 <- fraction.infected_c_p$V3/population[3]
+fraction.infected_c_p$V4 <- fraction.infected_c_p$V4/population[4]
+fraction.infected_c_p$V5 <- fraction.infected_c_p$V5/population[5]
+fraction.infected_c_p$V6 <- fraction.infected_c_p$V6/population[6]
+fraction.infected_c_p$V7 <- fraction.infected_c_p$V7/population[7]
+fraction.infected_c_p$V8 <- fraction.infected_c_p$V8/population[8]
+fraction.infected_c_p$V9 <- fraction.infected_c_p$V9/population[9]
+fraction.infected_c_p$V10 <- fraction.infected_c_p$V10/population[10]
+fraction.infected_c_p$V11 <- fraction.infected_c_p$V11/population[11]
+fraction.infected_c_p$V12 <- fraction.infected_c_p$V12/population[12]
+fraction.infected_c_p$V13 <- fraction.infected_c_p$V13/population[13]
+fraction.infected_c_p$V14 <- fraction.infected_c_p$V14/population[14]
+
+#Graphic for low risk people 
+
+ggplot( data=fraction.infected_c_p ) + geom_line( aes(x=Time, y=V1, colour = "0-2") ) + 
+  geom_line( aes(x=Time,y=V2, colour="3-5") )  + 
+  geom_line( aes(x=Time, y=V3, colour = "6-12") ) + 
+  geom_line( aes(x=Time,y=V4, colour="13-16") )  +
+  geom_line( aes(x=Time, y=V5, colour = "17-18") ) + 
+  geom_line( aes(x=Time,y=V6, colour="19-64") )  +
+  geom_line( aes(x=Time, y=V7, colour = "65+") ) + 
+  scale_colour_manual("", 
+                      breaks = c("0-2","3-5","6-12","13-16","17-18","19-64","65+"),
+                      values = c("darkblue","blue","darkred","red","darkviolet","violet","seagreen")) +
+  ylab( "Fraction infected" )+ 
+  labs(title = "Outbreaks of pandemic flu for low risk people with school closure")
+
+#Graphic for high risk people 
+
+ggplot( data=fraction.infected_c_p ) +  
+  geom_line( aes(x=Time, y=V8, colour="0-2 High risk") ) +
+  geom_line( aes(x=Time,y=V9, colour="3-5 High risk") ) +
+  geom_line( aes(x=Time, y=V10, colour="6-12 High risk") ) +
+  geom_line( aes(x=Time,y=V11, colour="13-16 High risk") ) +
+  geom_line( aes(x=Time, y=V12, colour="17-18 High risk") ) +
+  geom_line( aes(x=Time,y=V13, colour="19-64 High risk") ) +
+  geom_line( aes(x=Time, y=V14, colour="65+ High risk") ) +
+  scale_colour_manual("", 
+                      breaks = c("0-2 High risk","3-5 High risk","6-12 High risk","13-16 High risk","17-18 High risk","19-64 High risk","65+ High risk"),
+                      values = c("darkturquoise","turquoise","darkgreen","green3","darkorange","orange","royalblue")) +
+  ylab( "Fraction infected" )+ 
+  labs(title = "Outbreaks of pandemic flu for high risk people with school closure")
+
+```
+
+We can see that the peak of fractions of people infected is lower in case of school closure. This confirms that school closure is an efficient way to limit the spreading of the flu. 
+
+## Summary of the effects of school closure 
+
+The graphics showed the efficiency of school closure. However, because of the multiple curves, it was difficult to study more in detail its effects. That's why, we will divide the results into 4 age groups: 
+
+- The children who do not go to school: <0-2> 
+- The children who go to school: <3-18> 
+- The adults: <19-64> 
+- The elderly: <65+> 
+
+For each age group, there will be one graphic with 2 curves: 
+
+- one for people (low and high risk) without school closure 
+- one for people (low and high risk) with school closure 
+
+We will then do an interpretation with figures of the impact of school closure. 
+
+### For seasonal flu 
+
+```{r,fig.width=6,fig.height=6,fig.show='hold'}
+
+#Graphic for age group <0-2>
+
+fraction.infected_0_2_s <- NULL
+fraction.infected_0_2_s$Time <- odes_no_closure_s$Time
+fraction.infected_0_2_s$V1 <- rowSums(data.frame(odes_no_closure_s$V1,odes_no_closure_s$V8))
+fraction.infected_0_2_s$V2 <- rowSums(data.frame(odes_closure_s$V1,odes_closure_s$V8))
+
+fraction.infected_0_2_s <-data.frame(fraction.infected_0_2_s)
+
+ggplot( data=fraction.infected_0_2_s ) + geom_line( aes(x=Time, y=V1, colour = "0-2 without school closure") ) + 
+  geom_line( aes(x=Time, y=V2, colour = "0-2 with school closure") ) +
+  scale_colour_manual("", 
+                      breaks = c("0-2 without school closure","0-2 with school closure"),
+                      values = c("darkblue","blue")) +
+  ylab( "Number of people infected" )+
+  labs(title = "Outbreaks of seasonal flu for age group 0-2")
+
+#Graphic for age group <3-18> 
+
+fraction.infected_3_5_s <- NULL
+fraction.infected_3_5_s$Time <- odes_no_closure_s$Time
+fraction.infected_3_5_s$V1 <- rowSums(data.frame(odes_no_closure_s$V2,odes_no_closure_s$V9))
+fraction.infected_3_5_s$V2 <- rowSums(data.frame(odes_closure_s$V2,odes_closure_s$V9))
+
+fraction.infected_3_5_s <-data.frame(fraction.infected_3_5_s)
+
+fraction.infected_6_12_s <- NULL
+fraction.infected_6_12_s$Time <- odes_no_closure_s$Time
+fraction.infected_6_12_s$V1 <- rowSums(data.frame(odes_no_closure_s$V3,odes_no_closure_s$V10))
+fraction.infected_6_12_s$V2 <- rowSums(data.frame(odes_closure_s$V3,odes_closure_s$V10))
+
+fraction.infected_6_12_s <-data.frame(fraction.infected_6_12_s)
+
+fraction.infected_13_16_s <- NULL
+fraction.infected_13_16_s$Time <- odes_no_closure_s$Time
+fraction.infected_13_16_s$V1 <- rowSums(data.frame(odes_no_closure_s$V4,odes_no_closure_s$V11))
+fraction.infected_13_16_s$V2 <- rowSums(data.frame(odes_closure_s$V4,odes_closure_s$V11))
+
+fraction.infected_13_16_s <-data.frame(fraction.infected_13_16_s)
+
+fraction.infected_17_18_s <- NULL
+fraction.infected_17_18_s$Time <- odes_no_closure_s$Time
+fraction.infected_17_18_s$V1 <- rowSums(data.frame(odes_no_closure_s$V5,odes_no_closure_s$V12))
+fraction.infected_17_18_s$V2 <- rowSums(data.frame(odes_closure_s$V5,odes_closure_s$V12))
+
+fraction.infected_17_18_s <-data.frame(fraction.infected_17_18_s)
+
+fraction.infected_3_18_s <- NULL
+fraction.infected_3_18_s$Time <- odes_no_closure_s$Time
+fraction.infected_3_18_s$V1<-rowSums(data.frame(fraction.infected_3_5_s$V1,fraction.infected_6_12_s$V1,fraction.infected_13_16_s$V1,fraction.infected_17_18_s$V1))
+fraction.infected_3_18_s$V2 <- rowSums(data.frame(fraction.infected_3_5_s$V2,fraction.infected_6_12_s$V2,fraction.infected_13_16_s$V2,fraction.infected_17_18_s$V2)) 
+
+fraction.infected_3_18_s <-data.frame(fraction.infected_3_18_s)
+
+ggplot( data=fraction.infected_3_18_s ) + geom_line( aes(x=Time, y=V1, colour = "3-18 without school closure") ) + 
+  geom_line( aes(x=Time,y=V2, colour="3-18 with school closure") )  + 
+  scale_colour_manual("", 
+                      breaks = c("3-18 without school closure","3-18 with school closure"),
+                      values = c("darkblue","blue")) +
+  ylab( "Number of people infected" )+
+  labs(title = "Outbreaks of seasonal flu for age group 3-18")
+
+#Graphic for age group <19-64>
+
+fraction.infected_19_64_s <- NULL
+fraction.infected_19_64_s$Time <- odes_no_closure_s$Time
+fraction.infected_19_64_s$V1 <- rowSums(data.frame(odes_no_closure_s$V6,odes_no_closure_s$V13))
+fraction.infected_19_64_s$V2 <- rowSums(data.frame(odes_closure_s$V6,odes_closure_s$V13))
+
+fraction.infected_19_64_s <-data.frame(fraction.infected_19_64_s)
+
+ggplot( data=fraction.infected_19_64_s ) + geom_line( aes(x=Time, y=V1, colour = "19-64 without school closure") ) + 
+  geom_line( aes(x=Time,y=V2, colour="19-64 with school closure") )  + 
+  scale_colour_manual("", 
+                      breaks = c("19-64 without school closure","19-64 with school closure"),
+                      values = c("darkblue","blue")) +
+  ylab( "Number of people infected" )+
+  labs(title = "Outbreaks of seasonal flu for age group 19-64")
+
+#Graphic for age group <65+>
+
+fraction.infected_65_s <- NULL
+fraction.infected_65_s$Time <- odes_no_closure_s$Time
+fraction.infected_65_s$V1 <- rowSums(data.frame(odes_no_closure_s$V7,odes_no_closure_s$V14))
+fraction.infected_65_s$V2 <- rowSums(data.frame(odes_closure_s$V7,odes_closure_s$V14))
+
+fraction.infected_65_s <-data.frame(fraction.infected_65_s)
+
+ggplot( data=fraction.infected_65_s ) + geom_line( aes(x=Time, y=V1, colour = "65+ without school closure") ) + 
+  geom_line( aes(x=Time,y=V2, colour="65+ with school closure") )  + 
+  scale_colour_manual("", 
+                      breaks = c("65+ without school closure","65+ with school closure"),
+                      values = c("darkblue","blue")) +
+  ylab( "Number of people infected" )+
+  labs(title = "Outbreaks of seasonal flu for age group 65+")
+
+
+```
+
+We can clearly see on each graphic the benefits of school closure. Indeed, when the school are closed, the number of people infected is lower and the major part of the outbreak is delayed (maximum of people infected is reached later in case of school closure). This delay is important as it leaves time to specialist to create a vaccine efficient against the epidemy. 
+
+We will now quantify the reduction of the number of people infected and the delay granted by school closure. 
+
+#### Reduction of the number of people infected 
+
+```{r}
+
+#Age group <0-2> 
+
+nc_s_max_0_2 <- max(fraction.infected_0_2_s$V1)
+c_s_max_0_2 <- max(fraction.infected_0_2_s$V2)
+diff_s_0_2 <- nc_s_max_0_2 - c_s_max_0_2
+
+#Age group <3-5> 
+
+nc_s_max_3_5 <- max(fraction.infected_3_5_s$V1)
+c_s_max_3_5 <- max(fraction.infected_3_5_s$V2)
+diff_s_3_5 <- nc_s_max_3_5 - c_s_max_3_5
+
+#Age group <6-12> 
+
+nc_s_max_6_12 <- max(fraction.infected_6_12_s$V1)
+c_s_max_6_12 <- max(fraction.infected_6_12_s$V2)
+diff_s_6_12 <- nc_s_max_6_12 - c_s_max_6_12
+
+#Age group <13-16> 
+
+nc_s_max_13_16 <- max(fraction.infected_13_16_s$V1)
+c_s_max_13_16 <- max(fraction.infected_13_16_s$V2)
+diff_s_13_16 <- nc_s_max_13_16 - c_s_max_13_16
+
+#Age group <17-18> 
+
+nc_s_max_17_18 <- max(fraction.infected_17_18_s$V1)
+c_s_max_17_18 <- max(fraction.infected_17_18_s$V2)
+diff_s_17_18 <- nc_s_max_17_18 - c_s_max_17_18
+
+#Age group <19-64> 
+
+nc_s_max_19_64 <- max(fraction.infected_19_64_s$V1)
+c_s_max_19_64 <- max(fraction.infected_19_64_s$V2)
+diff_s_19_64 <- nc_s_max_19_64 - c_s_max_19_64
+
+#Age group <65+> 
+
+nc_s_max_65 <- max(fraction.infected_65_s$V1)
+c_s_max_65 <- max(fraction.infected_65_s$V2)
+diff_s_65 <- nc_s_max_65 - c_s_max_65
+
+#Results in a table 
+Reduction_s_results <- data.frame(
+  Number_infected_no_school_closure = c(nc_s_max_0_2,nc_s_max_3_5,nc_s_max_6_12,nc_s_max_13_16,nc_s_max_17_18,nc_s_max_19_64,nc_s_max_65),
+  Number_infected_school_closure = c(c_s_max_0_2,c_s_max_3_5,c_s_max_6_12,c_s_max_13_16,c_s_max_17_18,c_s_max_19_64,c_s_max_65),
+  Reduction = c(diff_s_0_2,diff_s_3_5,diff_s_6_12,diff_s_13_16,diff_s_17_18,diff_s_19_64,diff_s_65),
+  Reduction_percentage = c(diff_s_0_2*100/nc_s_max_0_2,diff_s_3_5*100/nc_s_max_3_5,diff_s_6_12*100/nc_s_max_6_12,diff_s_13_16*100/nc_s_max_13_16,diff_s_17_18*100/nc_s_max_17_18,diff_s_19_64*100/nc_s_max_19_64,diff_s_65*100/nc_s_max_65),
+  row.names = c("0-2","3-5","6-12","13-16","17-18","19-64","65+")
+)
+
+pander(Reduction_s_results)
+
+```
+
+We can see that closing schools reduces a lot the number maximum of people infected at the same time: between 75% and 90% of reduction. However, to see if the number of people infected for the whole period has lowered, we need to compare the area under both curves (estimation of total number of people infected during the period). 
+
+```{r}
+
+#Age group <0-2> 
+
+nc_s_area_0_2 <- sum(fraction.infected_0_2_s$V1)
+c_s_area_0_2 <- sum(fraction.infected_0_2_s$V2)
+diff_area_s_0_2 <- nc_s_area_0_2 - c_s_area_0_2
+
+#Age group <3-5> 
+
+nc_s_area_3_5 <- sum(fraction.infected_3_5_s$V1)
+c_s_area_3_5 <- sum(fraction.infected_3_5_s$V2)
+diff_area_s_3_5 <- nc_s_area_3_5 - c_s_area_3_5
+
+#Age group <6-12> 
+
+nc_s_area_6_12 <- sum(fraction.infected_6_12_s$V1)
+c_s_area_6_12 <- sum(fraction.infected_6_12_s$V2)
+diff_area_s_6_12 <- nc_s_area_6_12 - c_s_area_6_12
+
+#Age group <13-16> 
+
+nc_s_area_13_16 <- sum(fraction.infected_13_16_s$V1)
+c_s_area_13_16 <- sum(fraction.infected_13_16_s$V2)
+diff_area_s_13_16 <- nc_s_area_13_16 - c_s_area_13_16
+
+#Age group <17-18> 
+
+nc_s_area_17_18 <- sum(fraction.infected_17_18_s$V1)
+c_s_area_17_18 <- sum(fraction.infected_17_18_s$V2)
+diff_area_s_17_18 <- nc_s_area_17_18 - c_s_area_17_18
+
+#Age group <19-64> 
+
+nc_s_area_19_64 <- sum(fraction.infected_19_64_s$V1)
+c_s_area_19_64 <- sum(fraction.infected_19_64_s$V2)
+diff_area_s_19_64 <- nc_s_area_19_64 - c_s_area_19_64
+
+#Age group <65+> 
+
+nc_s_area_65 <- sum(fraction.infected_65_s$V1)
+c_s_area_65 <- sum(fraction.infected_65_s$V2)
+diff_area_s_65 <- nc_s_area_65 - c_s_area_65
+
+#Results in a table 
+Total_Reduction_s_results <- data.frame(
+  Total_infected_no_school_closure = c(nc_s_area_0_2,nc_s_area_3_5,nc_s_area_6_12,nc_s_area_13_16,nc_s_area_17_18,nc_s_area_19_64,nc_s_area_65),
+  Total_infected_school_closure = c(c_s_area_0_2,c_s_area_3_5,c_s_area_6_12,c_s_area_13_16,c_s_area_17_18,c_s_area_19_64,c_s_area_65),
+  Reduction = c(diff_area_s_0_2,diff_area_s_3_5,diff_area_s_6_12,diff_area_s_13_16,diff_area_s_17_18,diff_area_s_19_64,diff_area_s_65),
+  Reduction_percentage = c(diff_area_s_0_2*100/nc_s_area_0_2,diff_area_s_3_5*100/nc_s_area_3_5,diff_area_s_6_12*100/nc_s_area_6_12,diff_area_s_13_16*100/nc_s_area_13_16,diff_area_s_17_18*100/nc_s_area_17_18,diff_area_s_19_64*100/nc_s_area_19_64,diff_area_s_65*100/nc_s_area_65),
+  row.names = c("0-2","3-5","6-12","13-16","17-18","19-64","65+")
+)
+
+pander(Total_Reduction_s_results)
+
+```
+
+We can conclude that the total number of people has been reduced by between 40% and 75%. It is lower than the reduction of the peak of outbreak because when schools close, the outbreak last longer as the peak happens later. 
+
+#### Delay of the peak of outbreak  
+
+```{r}
+
+#Age group <0-2> 
+
+nc_s_i_max_0_2 <- which.max(fraction.infected_0_2_s$V1)
+c_s_i_max_0_2 <- which.max(fraction.infected_0_2_s$V2)
+nc_s_t_i_max_0_2 <- fraction.infected_0_2_s$Time[nc_s_i_max_0_2]
+c_s_t_i_max_0_2 <- fraction.infected_0_2_s$Time[c_s_i_max_0_2]
+delay_s_0_2 <- c_s_t_i_max_0_2 - nc_s_t_i_max_0_2
+
+#Age group <3-5> 
+
+nc_s_i_max_3_5 <- which.max(fraction.infected_3_5_s$V1)
+c_s_i_max_3_5 <- which.max(fraction.infected_3_5_s$V2)
+nc_s_t_i_max_3_5 <- fraction.infected_3_5_s$Time[nc_s_i_max_3_5]
+c_s_t_i_max_3_5 <- fraction.infected_3_5_s$Time[c_s_i_max_3_5]
+delay_s_3_5 <- c_s_t_i_max_3_5 - nc_s_t_i_max_3_5
+
+#Age group <6-12> 
+
+nc_s_i_max_6_12 <- which.max(fraction.infected_6_12_s$V1)
+c_s_i_max_6_12 <- which.max(fraction.infected_6_12_s$V2)
+nc_s_t_i_max_6_12 <- fraction.infected_6_12_s$Time[nc_s_i_max_6_12]
+c_s_t_i_max_6_12 <- fraction.infected_6_12_s$Time[c_s_i_max_6_12]
+delay_s_6_12 <- c_s_t_i_max_6_12 - nc_s_t_i_max_6_12
+
+#Age group <13-16> 
+
+nc_s_i_max_13_16 <- which.max(fraction.infected_13_16_s$V1)
+c_s_i_max_13_16 <- which.max(fraction.infected_13_16_s$V2)
+nc_s_t_i_max_13_16 <- fraction.infected_13_16_s$Time[nc_s_i_max_13_16]
+c_s_t_i_max_13_16 <- fraction.infected_13_16_s$Time[c_s_i_max_13_16]
+delay_s_13_16 <- c_s_t_i_max_13_16 - nc_s_t_i_max_13_16
+
+#Age group <17-18> 
+
+nc_s_i_max_17_18 <- which.max(fraction.infected_17_18_s$V1)
+c_s_i_max_17_18 <- which.max(fraction.infected_17_18_s$V2)
+nc_s_t_i_max_17_18 <- fraction.infected_17_18_s$Time[nc_s_i_max_17_18]
+c_s_t_i_max_17_18 <- fraction.infected_17_18_s$Time[c_s_i_max_17_18]
+delay_s_17_18 <- c_s_t_i_max_17_18 - nc_s_t_i_max_17_18
+
+#Age group <19-64> 
+
+nc_s_i_max_19_64 <- which.max(fraction.infected_19_64_s$V1)
+c_s_i_max_19_64 <- which.max(fraction.infected_19_64_s$V2)
+nc_s_t_i_max_19_64 <- fraction.infected_19_64_s$Time[nc_s_i_max_19_64]
+c_s_t_i_max_19_64 <- fraction.infected_19_64_s$Time[c_s_i_max_19_64]
+delay_s_19_64 <- c_s_t_i_max_19_64 - nc_s_t_i_max_19_64
+
+#Age group <65+> 
+
+nc_s_i_max_65 <- which.max(fraction.infected_65_s$V1)
+c_s_i_max_65 <- which.max(fraction.infected_65_s$V2)
+nc_s_t_i_max_65 <- fraction.infected_65_s$Time[nc_s_i_max_65]
+c_s_t_i_max_65 <- fraction.infected_0_2_s$Time[c_s_i_max_65]
+delay_s_65 <- c_s_t_i_max_65 - nc_s_t_i_max_65
+
+#Results in a table 
+Delay_outbreak_s_results <- data.frame(
+  Peak_outbreak_no_school_closure = c(nc_s_t_i_max_0_2,nc_s_t_i_max_3_5,nc_s_t_i_max_6_12,nc_s_t_i_max_13_16,nc_s_t_i_max_17_18,nc_s_t_i_max_19_64,nc_s_t_i_max_65),
+  Peak_outbreak_school_closure = c(c_s_t_i_max_0_2,c_s_t_i_max_3_5,c_s_t_i_max_6_12,c_s_t_i_max_13_16,c_s_t_i_max_17_18,c_s_t_i_max_19_64,c_s_t_i_max_65),
+  Delay_peak_outbreak = c(delay_s_0_2,delay_s_3_5,delay_s_6_12,delay_s_13_16,delay_s_17_18,delay_s_19_64,delay_s_65),
+  row.names = c("0-2","3-5","6-12","13-16","17-18","19-64","65+")
+)
+
+pander(Delay_outbreak_s_results)
+
+```
+
+Thanks to school closure the peak of outbreak has been delayed of 35 days (a little more than a month). Specialists need between 5 and 6 months to create a new vaccine so a delay of one month is precious time won. 
+
+### For pandemic flu 
+
+```{r,fig.width=6,fig.height=6,fig.show='hold'}
+
+#Graphic for age group <0-2>
+
+fraction.infected_0_2_p <- NULL
+fraction.infected_0_2_p$Time <- odes_no_closure_p$Time
+fraction.infected_0_2_p$V1 <- rowSums(data.frame(odes_no_closure_p$V1,odes_no_closure_p$V8))
+fraction.infected_0_2_p$V2 <- rowSums(data.frame(odes_closure_p$V1,odes_closure_p$V8))
+
+fraction.infected_0_2_p <-data.frame(fraction.infected_0_2_p)
+
+ggplot( data=fraction.infected_0_2_p ) + geom_line( aes(x=Time, y=V1, colour = "0-2 without school closure") ) + 
+  geom_line( aes(x=Time, y=V2, colour = "0-2 with school closure") ) +
+  scale_colour_manual("", 
+                      breaks = c("0-2 without school closure","0-2 with school closure"),
+                      values = c("darkblue","blue")) +
+  ylab( "Number of people infected" )+
+  labs(title = "Outbreaks of pandemic flu for age group 0-2")
+
+#Graphic for age group <3-18>
+
+fraction.infected_3_5_p <- NULL
+fraction.infected_3_5_p$Time <- odes_no_closure_p$Time
+fraction.infected_3_5_p$V1 <- rowSums(data.frame(odes_no_closure_p$V2,odes_no_closure_p$V9))
+fraction.infected_3_5_p$V2 <- rowSums(data.frame(odes_closure_p$V2,odes_closure_p$V9))
+
+fraction.infected_3_5_p <-data.frame(fraction.infected_3_5_p)
+
+fraction.infected_6_12_p <- NULL
+fraction.infected_6_12_p$Time <- odes_no_closure_p$Time
+fraction.infected_6_12_p$V1 <- rowSums(data.frame(odes_no_closure_p$V3,odes_no_closure_p$V10))
+fraction.infected_6_12_p$V2 <- rowSums(data.frame(odes_closure_p$V3,odes_closure_p$V10))
+
+fraction.infected_6_12_p <-data.frame(fraction.infected_6_12_p)
+
+fraction.infected_13_16_p <- NULL
+fraction.infected_13_16_p$Time <- odes_no_closure_p$Time
+fraction.infected_13_16_p$V1 <- rowSums(data.frame(odes_no_closure_p$V4,odes_no_closure_p$V11))
+fraction.infected_13_16_p$V2 <- rowSums(data.frame(odes_closure_p$V4,odes_closure_p$V11))
+
+fraction.infected_13_16_p <-data.frame(fraction.infected_13_16_p)
+
+fraction.infected_17_18_p <- NULL
+fraction.infected_17_18_p$Time <- odes_no_closure_p$Time
+fraction.infected_17_18_p$V1 <- rowSums(data.frame(odes_no_closure_p$V5,odes_no_closure_p$V12))
+fraction.infected_17_18_p$V2 <- rowSums(data.frame(odes_closure_p$V5,odes_closure_p$V12))
+
+fraction.infected_17_18_p <-data.frame(fraction.infected_17_18_p)
+
+fraction.infected_3_18_p <- NULL
+fraction.infected_3_18_p$Time <- odes_no_closure_p$Time
+fraction.infected_3_18_p$V1<-rowSums(data.frame(fraction.infected_3_5_p$V1,fraction.infected_6_12_p$V1,fraction.infected_13_16_p$V1,fraction.infected_17_18_p$V1))
+fraction.infected_3_18_p$V2 <- rowSums(data.frame(fraction.infected_3_5_p$V2,fraction.infected_6_12_p$V2,fraction.infected_13_16_p$V2,fraction.infected_17_18_p$V2)) 
+
+fraction.infected_3_18_p <-data.frame(fraction.infected_3_18_p)
+
+ggplot( data=fraction.infected_3_18_p ) + geom_line( aes(x=Time, y=V1, colour = "3-18 without school closure") ) + 
+  geom_line( aes(x=Time,y=V2, colour="3-18 with school closure") )  + 
+  scale_colour_manual("", 
+                      breaks = c("3-18 without school closure","3-18 with school closure"),
+                      values = c("darkblue","blue")) +
+  ylab( "Number of people infected" )+
+  labs(title = "Outbreaks of pandemic flu for age group 3-18")
+
+#Graphic for age group <19-64>
+
+fraction.infected_19_64_p <- NULL
+fraction.infected_19_64_p$Time <- odes_no_closure_p$Time
+fraction.infected_19_64_p$V1 <- rowSums(data.frame(odes_no_closure_p$V6,odes_no_closure_p$V13))
+fraction.infected_19_64_p$V2 <- rowSums(data.frame(odes_closure_p$V6,odes_closure_p$V13))
+
+fraction.infected_19_64_p <-data.frame(fraction.infected_19_64_p)
+
+ggplot( data=fraction.infected_19_64_p ) + geom_line( aes(x=Time, y=V1, colour = "19-64 without school closure") ) + 
+  geom_line( aes(x=Time,y=V2, colour="19-64 with school closure") )  + 
+  scale_colour_manual("", 
+                      breaks = c("19-64 without school closure","19-64 with school closure"),
+                      values = c("darkblue","blue")) +
+  ylab( "Number of people infected" )+
+  labs(title = "Outbreaks of pandemic flu for age group 19-64")
+
+#Graphic for age group <65+>
+
+fraction.infected_65_p <- NULL
+fraction.infected_65_p$Time <- odes_no_closure_p$Time
+fraction.infected_65_p$V1 <- rowSums(data.frame(odes_no_closure_p$V7,odes_no_closure_p$V14))
+fraction.infected_65_p$V2 <- rowSums(data.frame(odes_closure_p$V7,odes_closure_p$V14))
+
+fraction.infected_65_p <-data.frame(fraction.infected_65_p)
+
+ggplot( data=fraction.infected_65_p ) + geom_line( aes(x=Time, y=V1, colour = "65+ without school closure") ) + 
+  geom_line( aes(x=Time,y=V2, colour="65+ with school closure") )  + 
+  scale_colour_manual("", 
+                      breaks = c("65+ without school closure","65+ with school closure"),
+                      values = c("darkblue","blue")) +
+  ylab( "Number of people infected" )+
+  labs(title = "Outbreaks of pandemic flu for age group 65+")
+
+
+```
+
+We can clearly see on each graphic the benefits of school closure. Indeed, when the school are closed, the number of people infected is lower and the major part of the outbreak is delayed (maximum of people infected is reached later in case of school closure). This delay is important as it leaves time to specialist to create a vaccine efficient against the epidemy. 
+
+We will now quantify the reduction of the number of people infected and the delay granted by school closure. 
+
+#### Reduction of the number of people infected 
+
+```{r}
+
+#Age group <0-2> 
+
+nc_p_max_0_2 <- max(fraction.infected_0_2_p$V1)
+c_p_max_0_2 <- max(fraction.infected_0_2_p$V2)
+diff_p_0_2 <- nc_p_max_0_2 - c_p_max_0_2
+
+#Age group <3-5> 
+
+nc_p_max_3_5 <- max(fraction.infected_3_5_p$V1)
+c_p_max_3_5 <- max(fraction.infected_3_5_p$V2)
+diff_p_3_5 <- nc_p_max_3_5 - c_p_max_3_5
+
+#Age group <6-12> 
+
+nc_p_max_6_12 <- max(fraction.infected_6_12_p$V1)
+c_p_max_6_12 <- max(fraction.infected_6_12_p$V2)
+diff_p_6_12 <- nc_p_max_6_12 - c_p_max_6_12
+
+#Age group <13-16> 
+
+nc_p_max_13_16 <- max(fraction.infected_13_16_p$V1)
+c_p_max_13_16 <- max(fraction.infected_13_16_p$V2)
+diff_p_13_16 <- nc_p_max_13_16 - c_p_max_13_16
+
+#Age group <17-18> 
+
+nc_p_max_17_18 <- max(fraction.infected_17_18_p$V1)
+c_p_max_17_18 <- max(fraction.infected_17_18_p$V2)
+diff_p_17_18 <- nc_p_max_17_18 - c_p_max_17_18
+
+#Age group <19-64> 
+
+nc_p_max_19_64 <- max(fraction.infected_19_64_p$V1)
+c_p_max_19_64 <- max(fraction.infected_19_64_p$V2)
+diff_p_19_64 <- nc_p_max_19_64 - c_p_max_19_64
+
+#Age group <65+> 
+
+nc_p_max_65 <- max(fraction.infected_65_p$V1)
+c_p_max_65 <- max(fraction.infected_65_p$V2)
+diff_p_65 <- nc_p_max_65 - c_p_max_65
+
+#Results in a table 
+Reduction_p_results <- data.frame(
+  Number_infected_no_school_closure = c(nc_p_max_0_2,nc_p_max_3_5,nc_p_max_6_12,nc_p_max_13_16,nc_p_max_17_18,nc_p_max_19_64,nc_p_max_65),
+  Number_infected_school_closure = c(c_p_max_0_2,c_p_max_3_5,c_p_max_6_12,c_p_max_13_16,c_p_max_17_18,c_p_max_19_64,c_p_max_65),
+  Reduction = c(diff_p_0_2,diff_p_3_5,diff_p_6_12,diff_p_13_16,diff_p_17_18,diff_p_19_64,diff_p_65),
+  Reduction_percentage = c(diff_p_0_2*100/nc_p_max_0_2,diff_p_3_5*100/nc_p_max_3_5,diff_p_6_12*100/nc_p_max_6_12,diff_p_13_16*100/nc_p_max_13_16,diff_p_17_18*100/nc_p_max_17_18,diff_p_19_64*100/nc_p_max_19_64,diff_p_65*100/nc_p_max_65),
+  row.names = c("0-2","3-5","6-12","13-16","17-18","19-64","65+")
+)
+
+pander(Reduction_p_results)
+
+```
+
+We can see that closing schools reduces a lot the number maximum of people infected at the same time: between 35% and 60% of reduction. However, to see if the number of people infected for the whole period has lowered, we need to compare the area under both curves (estimation of total number of people infected during the period). 
+
+```{r}
+
+#Age group <0-2> 
+
+nc_p_area_0_2 <- sum(fraction.infected_0_2_p$V1)
+c_p_area_0_2 <- sum(fraction.infected_0_2_p$V2)
+diff_area_p_0_2 <- nc_p_area_0_2 - c_p_area_0_2
+
+#Age group <3-5> 
+
+nc_p_area_3_5 <- sum(fraction.infected_3_5_p$V1)
+c_p_area_3_5 <-sum(fraction.infected_3_5_p$V2)
+diff_area_p_3_5 <- nc_p_area_3_5 - c_p_area_3_5
+
+#Age group <6-12> 
+
+nc_p_area_6_12 <- sum(fraction.infected_6_12_p$V1)
+c_p_area_6_12 <- sum(fraction.infected_6_12_p$V2)
+diff_area_p_6_12 <- nc_p_area_6_12 - c_p_area_6_12
+
+#Age group <13-16> 
+
+nc_p_area_13_16 <- sum(fraction.infected_13_16_p$V1)
+c_p_area_13_16 <- sum(fraction.infected_13_16_p$V2)
+diff_area_p_13_16 <- nc_p_area_13_16 - c_p_area_13_16
+
+#Age group <17-18> 
+
+nc_p_area_17_18 <- sum(fraction.infected_17_18_p$V1)
+c_p_area_17_18 <- sum(fraction.infected_17_18_p$V2)
+diff_area_p_17_18 <- nc_p_area_17_18 - c_p_area_17_18
+
+#Age group <19-64> 
+
+nc_p_area_19_64 <- sum(fraction.infected_19_64_p$V1)
+c_p_area_19_64 <- sum(fraction.infected_19_64_p$V2)
+diff_area_p_19_64 <- nc_p_area_19_64 - c_p_area_19_64
+
+#Age group <65+> 
+
+nc_p_area_65 <- sum(fraction.infected_65_p$V1)
+c_p_area_65 <- sum(fraction.infected_65_p$V2)
+diff_area_p_65 <- nc_p_area_65 - c_p_area_65
+
+#Results in a table 
+Total_Reduction_p_results <- data.frame(
+  Total_infected_no_school_closure = c(nc_p_area_0_2,nc_p_area_3_5,nc_p_area_6_12,nc_p_area_13_16,nc_p_area_17_18,nc_p_area_19_64,nc_p_area_65),
+  Total_infected_school_closure = c(c_p_area_0_2,c_p_area_3_5,c_p_area_6_12,c_p_area_13_16,c_p_area_17_18,c_p_area_19_64,c_p_area_65),
+  Reduction = c(diff_area_p_0_2,diff_area_p_3_5,diff_area_p_6_12,diff_area_p_13_16,diff_area_p_17_18,diff_area_p_19_64,diff_area_p_65),
+  Reduction_percentage = c(diff_area_p_0_2*100/nc_p_area_0_2,diff_area_p_3_5*100/nc_p_area_3_5,diff_area_p_6_12*100/nc_p_area_6_12,diff_area_p_13_16*100/nc_p_area_13_16,diff_area_p_17_18*100/nc_p_area_17_18,diff_area_p_19_64*100/nc_p_area_19_64,diff_area_p_65*100/nc_p_area_65),
+  row.names = c("0-2","3-5","6-12","13-16","17-18","19-64","65+")
+)
+
+pander(Total_Reduction_p_results)
+
+```
+
+We can conclude that the total number of people has been reduced by between 15% and 45%. It is lower than the reduction of the peak of outbreak because when schools close, the outbreak last longer as the peak happens later. 
+
+#### Delay of the peak of outbreak  
+
+```{r}
+
+#Age group <0-2> 
+
+nc_p_i_max_0_2 <- which.max(fraction.infected_0_2_p$V1)
+c_p_i_max_0_2 <- which.max(fraction.infected_0_2_p$V2)
+nc_p_t_i_max_0_2 <- fraction.infected_0_2_p$Time[nc_p_i_max_0_2]
+c_p_t_i_max_0_2 <- fraction.infected_0_2_p$Time[c_p_i_max_0_2]
+delay_p_0_2 <- c_p_t_i_max_0_2 - nc_p_t_i_max_0_2
+
+#Age group <3-5> 
+
+nc_p_i_max_3_5 <- which.max(fraction.infected_3_5_p$V1)
+c_p_i_max_3_5 <- which.max(fraction.infected_3_5_p$V2)
+nc_p_t_i_max_3_5 <- fraction.infected_3_5_p$Time[nc_p_i_max_3_5]
+c_p_t_i_max_3_5 <- fraction.infected_3_5_p$Time[c_p_i_max_3_5]
+delay_p_3_5 <- c_p_t_i_max_3_5 - nc_p_t_i_max_3_5
+
+#Age group <6-12> 
+
+nc_p_i_max_6_12 <- which.max(fraction.infected_6_12_p$V1)
+c_p_i_max_6_12 <- which.max(fraction.infected_6_12_p$V2)
+nc_p_t_i_max_6_12 <- fraction.infected_6_12_p$Time[nc_p_i_max_6_12]
+c_p_t_i_max_6_12 <- fraction.infected_6_12_p$Time[c_p_i_max_6_12]
+delay_p_6_12 <- c_p_t_i_max_6_12 - nc_p_t_i_max_6_12
+
+#Age group <13-16> 
+
+nc_p_i_max_13_16 <- which.max(fraction.infected_13_16_p$V1)
+c_p_i_max_13_16 <- which.max(fraction.infected_13_16_p$V2)
+nc_p_t_i_max_13_16 <- fraction.infected_13_16_p$Time[nc_p_i_max_13_16]
+c_p_t_i_max_13_16 <- fraction.infected_13_16_p$Time[c_p_i_max_13_16]
+delay_p_13_16 <- c_p_t_i_max_13_16 - nc_p_t_i_max_13_16
+
+#Age group <17-18> 
+
+nc_p_i_max_17_18 <- which.max(fraction.infected_17_18_p$V1)
+c_p_i_max_17_18 <- which.max(fraction.infected_17_18_p$V2)
+nc_p_t_i_max_17_18 <- fraction.infected_17_18_p$Time[nc_p_i_max_17_18]
+c_p_t_i_max_17_18 <- fraction.infected_17_18_p$Time[c_p_i_max_17_18]
+delay_p_17_18 <- c_p_t_i_max_17_18 - nc_p_t_i_max_17_18
+
+#Age group <19-64> 
+
+nc_p_i_max_19_64 <- which.max(fraction.infected_19_64_p$V1)
+c_p_i_max_19_64 <- which.max(fraction.infected_19_64_p$V2)
+nc_p_t_i_max_19_64 <- fraction.infected_19_64_p$Time[nc_p_i_max_19_64]
+c_p_t_i_max_19_64 <- fraction.infected_19_64_p$Time[c_p_i_max_19_64]
+delay_p_19_64 <- c_p_t_i_max_19_64 - nc_p_t_i_max_19_64
+
+#Age group <65+> 
+
+nc_p_i_max_65 <- which.max(fraction.infected_65_p$V1)
+c_p_i_max_65 <- which.max(fraction.infected_65_p$V2)
+nc_p_t_i_max_65 <- fraction.infected_65_p$Time[nc_p_i_max_65]
+c_p_t_i_max_65 <- fraction.infected_0_2_p$Time[c_p_i_max_65]
+delay_p_65 <- c_p_t_i_max_65 - nc_p_t_i_max_65
+
+#Results in a table 
+Delay_outbreak_p_results <- data.frame(
+  Peak_outbreak_no_school_closure = c(nc_p_t_i_max_0_2,nc_p_t_i_max_3_5,nc_p_t_i_max_6_12,nc_p_t_i_max_13_16,nc_p_t_i_max_17_18,nc_p_t_i_max_19_64,nc_p_t_i_max_65),
+  Peak_outbreak_school_closure = c(c_p_t_i_max_0_2,c_p_t_i_max_3_5,c_p_t_i_max_6_12,c_p_t_i_max_13_16,c_p_t_i_max_17_18,c_p_t_i_max_19_64,c_p_t_i_max_65),
+  Delay_peak_outbreak = c(delay_p_0_2,delay_p_3_5,delay_p_6_12,delay_p_13_16,delay_p_17_18,delay_p_19_64,delay_p_65),
+  row.names = c("0-2","3-5","6-12","13-16","17-18","19-64","65+")
+)
+
+pander(Delay_outbreak_p_results)
+
+```
+
+Thanks to school closure the peak of outbreak has been slightly delayed (between 7 and 14 days depending on the age group). Specialists need between 5 and 6 months to create a new vaccine so even a short delay of one or two weeks is precious time won. 
+
